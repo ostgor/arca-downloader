@@ -64,16 +64,18 @@ def verify_data(data):
             for key in default_setting():
                 if key not in data:
                     raise Exception(f'no <{key}> in settings')
-            for key in ('title', 'content', 'upvote', 'downvote', 'combined', 'uploader', 'fav', 'category'):
+            for key in (
+                    'title', 'content', 'upvote', 'downvote', 'combined', 'uploader', 'fav', 'category', 'ch_f', 'df_f'
+            ):
                 if type(data[key]) is not bool:
                     raise Exception('not a boolean')
-            for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_mode', 'dl_count'):
+            for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_mode', 'dl_count', 'prev_category'):
                 if type(data[key]) is not int:
                     raise Exception('not an int')
             for key in ('channel_category',):
                 if type(data[key]) is not list:
                     raise Exception('not a list')
-            for key in ('category_bl', 'prev', 'title_bl', 'content_bl', 'uploader_bl'):
+            for key in ('category_bl', 'title_bl', 'content_bl', 'uploader_bl'):
                 if type(data[key]) is not dict:
                     raise Exception('not a dict')
         else:
@@ -83,8 +85,6 @@ def verify_data(data):
                 raise Exception('channel name or url corrupted')
             elif len(data['channel_category']) == 0:
                 raise Exception('no channel category')
-            elif 'category' not in data['prev'] or 'df_f' not in data['prev'] or 'ch_f' not in data['prev']:
-                raise Exception('prev does not contain category/df_f/ch_f')
             return
         else:
             return
@@ -108,11 +108,9 @@ def default_setting():
         'channel_name': None,
         'channel_url': None,
         'channel_category': [],
-        'prev': {
-            'category': 0,
-            'df_f': False,
-            'ch_f': False
-        },
+        'prev_category': 0,
+        'df_f': False,
+        'ch_f': False,
         'dl_count': 0,
         'fav': False,
         'dl_mode': 0,
@@ -159,6 +157,7 @@ def toggle(settings, attr: str):
     return inner
 
 
+# TODO: if modifying upvotes and downvotes they should be 0 or more
 def modify(settings, attr: str):
     def mod_loop(data):
         while True:
@@ -323,8 +322,8 @@ def display_download(ch_data):
     print(f'[DOWNLOAD CHANNEL: {ch_data["channel_name"]}]')
     print(' 1. Start download')
     print(f' 2. Download category: {last_downloaded_category(ch_data)}')
-    print(' 3. Use default filter'.ljust(50, '-') + f'[{ch_data["prev"]["df_f"]}]')
-    print(' 4. Use channel specific filter'.ljust(50, '-') + f'[{ch_data["prev"]["ch_f"]}]')
+    print(' 3. Use default filter'.ljust(50, '-') + f'[{ch_data["df_f"]}]')
+    print(' 4. Use channel specific filter'.ljust(50, '-') + f'[{ch_data["ch_f"]}]')
     print(' 5. Go back')
 
 
@@ -482,10 +481,11 @@ def delete_channel(data):
 
 
 def last_downloaded_category(ch_data):
-    cat_index = ch_data['prev']['category']
+    cat_index = ch_data['prev_category']
     return ch_data['channel_category'][cat_index][1]
 
 
+# TODO: implement warning if category to download is blacklisted
 def download(data):
     ch_data = select_channel(data)
     os.system('cls')
@@ -553,22 +553,22 @@ def download(data):
                     continue
                 os.system('cls')
                 if userinput in range(len(ch_data['channel_category'])):
-                    ch_data['prev']['category'] = userinput
+                    ch_data['prev_category'] = userinput
                     write_channels(data)
                     break
                 else:
                     print('Invalid index')
         # toggle default filter
         elif ans == '3':
-            ch_data['prev']['df_f'] = not ch_data['prev']['df_f']
-            if ch_data['prev']['df_f'] and ch_data['prev']['ch_f']:
-                ch_data['prev']['ch_f'] = False
+            ch_data['df_f'] = not ch_data['df_f']
+            if ch_data['df_f'] and ch_data['ch_f']:
+                ch_data['ch_f'] = False
             write_channels(data)
         # toggle channel filter
         elif ans == '4':
-            ch_data['prev']['ch_f'] = not ch_data['prev']['ch_f']
-            if ch_data['prev']['df_f'] and ch_data['prev']['ch_f']:
-                ch_data['prev']['df_f'] = False
+            ch_data['ch_f'] = not ch_data['ch_f']
+            if ch_data['df_f'] and ch_data['ch_f']:
+                ch_data['df_f'] = False
             write_channels(data)
         elif ans == '5':
             print()
@@ -577,6 +577,7 @@ def download(data):
             print('Invalid input')
 
 
+# TODO: implement
 def change_dl_location(data):
     pass
 
