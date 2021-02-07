@@ -1,10 +1,9 @@
 import json
 import os
 import sys
-import bs4
-import requests
 import re
 import downloader
+import traceback
 
 
 def main():
@@ -61,26 +60,26 @@ def load_channels():
 
 def verify_data(data):
     def verify_settings(data, is_channel):
-        if type(data) == dict:
+        if type(data) is dict:
             for key in default_setting():
                 if key not in data:
                     raise Exception(f'no <{key}> in settings')
             for key in ('title', 'content', 'upvote', 'downvote', 'combined', 'uploader', 'fav', 'category'):
-                if type(data[key]) != bool:
+                if type(data[key]) is not bool:
                     raise Exception('not a boolean')
             for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_mode', 'dl_count'):
-                if type(data[key]) != int:
+                if type(data[key]) is not int:
                     raise Exception('not an int')
             for key in ('channel_category',):
-                if type(data[key]) != list:
+                if type(data[key]) is not list:
                     raise Exception('not a list')
             for key in ('category_bl', 'prev', 'title_bl', 'content_bl', 'uploader_bl'):
-                if type(data[key]) != dict:
+                if type(data[key]) is not dict:
                     raise Exception('not a dict')
         else:
             raise Exception('data not a dict')
         if is_channel:
-            if (type(data['channel_name']) != str) or (type(data['channel_url']) != str):
+            if (type(data['channel_name']) is not str) or (type(data['channel_url']) is not str):
                 raise Exception('channel name or url corrupted')
             elif len(data['channel_category']) == 0:
                 raise Exception('no channel category')
@@ -190,16 +189,16 @@ def default_filter(data):
 
 
 def blacklist(settings, attr: str):
-    # column is set to 1 because korean lang breaks ljust
+    # column is set to 1 because korean language breaks ljust
     def blacklist_loop(data):
         bl_dict = settings[attr]
         page = 1
         print('Select an empty container to add, select an occupied one to delete')
         while True:
             elems_on_page = 10
-            start = (page - 1) * elems_on_page
+            start = (page-1) * elems_on_page
             end = page * elems_on_page
-            for i in range(start + 1, end + 1):
+            for i in range(start+1, end+1):
                 print(f'{i}.'.rjust(4) + (bl_dict.get(str(i)) or ''))
             select = 11 if page == 1 else 1
             print(f' {select}. Go back  {select+1}. next  {select+2}. previous')
@@ -209,7 +208,7 @@ def blacklist(settings, attr: str):
                 os.system('cls')
                 print()
                 continue
-            if userinput in range(start + 1, end + 1):
+            if userinput in range(start+1, end+1):
                 if bl_dict.get(str(userinput)):
                     os.system('cls')
                     del bl_dict[str(userinput)]
@@ -379,9 +378,9 @@ def ch_blacklist(ch_settings, attr):
         print('Select an empty container to add, select an occupied one to delete')
         while True:
             elems_on_page = 10
-            start = (page - 1) * elems_on_page
+            start = (page-1) * elems_on_page
             end = page * elems_on_page
-            for i in range(start + 1, end + 1):
+            for i in range(start+1, end+1):
                 print(f'{i}.'.rjust(4) + (category_bl.get(str(i))[1] if category_bl.get(str(i)) else ''))
             select = 11 if page == 1 else 1
             print(f' {select}. Go back  {select+1}. next  {select+2}. previous')
@@ -392,7 +391,7 @@ def ch_blacklist(ch_settings, attr):
                 print('Invalid input')
                 continue
             os.system('cls')
-            if userinput in range(start + 1, end + 1):
+            if userinput in range(start+1, end+1):
                 if category_bl.get(str(userinput)):
                     del category_bl[str(userinput)]
                     write_channels(data)
@@ -433,7 +432,6 @@ def category_select(category_list, category_bl):
         return
 
 
-# TODO: move to downloader
 def register_channel(data):
     ch_data = default_setting()
     url = input('Input channel url: ')
@@ -442,19 +440,10 @@ def register_channel(data):
     if match:
         url = match.group(0)
         try:
-            r = requests.get(url)
-            r.raise_for_status()
-            soup = bs4.BeautifulSoup(r.text, 'html.parser')
-            ch_data['channel_name'] = soup.select_one('.board-title > a:nth-child(2)').getText()
-            if not ch_data['channel_name']:
-                raise Exception('no channel name found')
-            for tag in soup.select('.board-category a'):
-                ch_data['channel_category'].append([tag['href'], tag.getText()])
-            ch_data['channel_url'] = url
+            ch_data = downloader.ch_register(url, ch_data)
             os.system('cls')
             data['channels'].append(ch_data)
             write_channels(data)
-            return
         except Exception as expt:
             print('failed to register:', expt)
     else:
@@ -497,7 +486,6 @@ def last_downloaded_category(ch_data):
     return ch_data['channel_category'][cat_index][1]
 
 
-# TODO: implement
 def download(data):
     ch_data = select_channel(data)
     os.system('cls')
@@ -524,12 +512,32 @@ def download(data):
                     os.system('cls')
                     print('Enter valid starting page and ending page')
                     continue
+                print(f'Start download on page {startpage}-{endpage}?\n 1. Yes  2. No')
+                if input('Input: ') != '1':
+                    os.system('cls')
+                    print()
+                    break
                 os.system('cls')
                 print('Starting download...')
-                downloader.temp_download(ch_data, startpage, endpage)
+                try:
+                    downloader.temp_download(ch_data, startpage, endpage, data['default'])
+                except Exception:
+                    print('Failed download:')
+                    traceback.print_exc()
+                    try:
+                        with open('exception_log.txt', 'a') as f:
+                            traceback.print_exc(file=f)
+                    except Exception as expt:
+                        print('Failed to save exception:', expt)
+                    input('Press enter to return')
+                    os.system('cls')
+                    print()
+                    return
+                # else
                 input('Press enter')
                 os.system('cls')
-                print()
+                ch_data['dl_count'] += 1
+                write_channels(data)
                 return
         # select category
         elif ans == '2':
