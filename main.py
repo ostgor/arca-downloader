@@ -4,6 +4,7 @@ import sys
 import bs4
 import requests
 import re
+import downloader
 
 
 def main():
@@ -73,19 +74,19 @@ def verify_data(data):
             for key in ('channel_category',):
                 if type(data[key]) != list:
                     raise Exception('not a list')
-            for key in ('category_bl', 'last_downloaded', 'title_bl', 'content_bl', 'uploader_bl'):
+            for key in ('category_bl', 'prev', 'title_bl', 'content_bl', 'uploader_bl'):
                 if type(data[key]) != dict:
                     raise Exception('not a dict')
         else:
             raise Exception('data not a dict')
         if is_channel:
-            if (type(data['channel_name']) == str) and (type(data['channel_url']) == str):
-                if len(data['channel_category']) != 0:
-                    return
-                else:
-                    raise Exception('no channel category')
-            else:
+            if (type(data['channel_name']) != str) or (type(data['channel_url']) != str):
                 raise Exception('channel name or url corrupted')
+            elif len(data['channel_category']) == 0:
+                raise Exception('no channel category')
+            elif 'category' not in data['prev'] or 'df_f' not in data['prev'] or 'ch_f' not in data['prev']:
+                raise Exception('prev does not contain category/df_f/ch_f')
+            return
         else:
             return
 
@@ -108,7 +109,11 @@ def default_setting():
         'channel_name': None,
         'channel_url': None,
         'channel_category': [],
-        'last_downloaded': {},
+        'prev': {
+            'category': 0,
+            'df_f': False,
+            'ch_f': False
+        },
         'dl_count': 0,
         'fav': False,
         'dl_mode': 0,
@@ -148,14 +153,14 @@ def write_channels(data):
             sys.exit()
 
 
-def toggler(settings, attr: str):
+def toggle(settings, attr: str):
     def inner(data):
         settings[attr] = not settings[attr]
         write_channels(data)
     return inner
 
 
-def modifier(settings, attr: str):
+def modify(settings, attr: str):
     def mod_loop(data):
         while True:
             print('Current count:', settings[attr])
@@ -166,7 +171,7 @@ def modifier(settings, attr: str):
                 settings[attr] = num
                 write_channels(data)
                 return
-            except:
+            except ValueError:
                 print('not a valid number')
     return mod_loop
 
@@ -184,7 +189,7 @@ def default_filter(data):
             action(data)
 
 
-def blacklister(settings, attr: str):
+def blacklist(settings, attr: str):
     # column is set to 1 because korean lang breaks ljust
     def blacklist_loop(data):
         bl_dict = settings[attr]
@@ -200,7 +205,7 @@ def blacklister(settings, attr: str):
             print(f' {select}. Go back  {select+1}. next  {select+2}. previous')
             try:
                 userinput = int(input('Input: '))
-            except:
+            except ValueError:
                 os.system('cls')
                 print()
                 continue
@@ -276,14 +281,14 @@ def display_ch_filter(ch_data):
     print('15. Favorite (shows at the top when selecting)'.ljust(50, '-') + f'[{ch_data["fav"]}]')
     print('16. Go back')
     choices = {
-        '1': toggler(ch_data, 'title'), '2': blacklister(ch_data, 'title_bl'),
-        '3': toggler(ch_data, 'content'), '4': blacklister(ch_data, 'content_bl'),
-        '5': toggler(ch_data, 'uploader'), '6': blacklister(ch_data, 'uploader_bl'),
-        '7': toggler(ch_data, 'upvote'), '8': modifier(ch_data, 'upvote_num'),
-        '9': toggler(ch_data, 'downvote'), '10': modifier(ch_data, 'downvote_num'),
-        '11': toggler(ch_data, 'combined'), '12': modifier(ch_data, 'combined_num'),
-        '13': toggler(ch_data, 'category'), '14': ch_blacklister(ch_data, 'category_bl'),
-        '15': toggler(ch_data, 'fav'), '16': 'break'
+        '1': toggle(ch_data, 'title'), '2': blacklist(ch_data, 'title_bl'),
+        '3': toggle(ch_data, 'content'), '4': blacklist(ch_data, 'content_bl'),
+        '5': toggle(ch_data, 'uploader'), '6': blacklist(ch_data, 'uploader_bl'),
+        '7': toggle(ch_data, 'upvote'), '8': modify(ch_data, 'upvote_num'),
+        '9': toggle(ch_data, 'downvote'), '10': modify(ch_data, 'downvote_num'),
+        '11': toggle(ch_data, 'combined'), '12': modify(ch_data, 'combined_num'),
+        '13': toggle(ch_data, 'category'), '14': ch_blacklist(ch_data, 'category_bl'),
+        '15': toggle(ch_data, 'fav'), '16': 'break'
     }
     return choices
 
@@ -304,15 +309,24 @@ def display_df_filter(df_data):
     print('12. Manage combined vote count ' + f'(download if {df_data["combined_num"]} or more)', end='\n\n')
     print('13. Go back')
     choices = {
-        '1': toggler(df_data, 'title'), '2': blacklister(df_data, 'title_bl'),
-        '3': toggler(df_data, 'content'), '4': blacklister(df_data, 'content_bl'),
-        '5': toggler(df_data, 'uploader'), '6': blacklister(df_data, 'uploader_bl'),
-        '7': toggler(df_data, 'upvote'), '8': modifier(df_data, 'upvote_num'),
-        '9': toggler(df_data, 'downvote'), '10': modifier(df_data, 'downvote_num'),
-        '11': toggler(df_data, 'combined'), '12': modifier(df_data, 'combined_num'),
+        '1': toggle(df_data, 'title'), '2': blacklist(df_data, 'title_bl'),
+        '3': toggle(df_data, 'content'), '4': blacklist(df_data, 'content_bl'),
+        '5': toggle(df_data, 'uploader'), '6': blacklist(df_data, 'uploader_bl'),
+        '7': toggle(df_data, 'upvote'), '8': modify(df_data, 'upvote_num'),
+        '9': toggle(df_data, 'downvote'), '10': modify(df_data, 'downvote_num'),
+        '11': toggle(df_data, 'combined'), '12': modify(df_data, 'combined_num'),
         '13': 'break'
     }
     return choices
+
+
+def display_download(ch_data):
+    print(f'[DOWNLOAD CHANNEL: {ch_data["channel_name"]}]')
+    print(' 1. Start download')
+    print(f' 2. Download category: {last_downloaded_category(ch_data)}')
+    print(' 3. Use default filter'.ljust(50, '-') + f'[{ch_data["prev"]["df_f"]}]')
+    print(' 4. Use channel specific filter'.ljust(50, '-') + f'[{ch_data["prev"]["ch_f"]}]')
+    print(' 5. Go back')
 
 
 # channel maintaining
@@ -358,7 +372,7 @@ def select_channel(data) -> "channel's settings(dict)":
             print('Invaild input')
 
 
-def ch_blacklister(ch_settings, attr):
+def ch_blacklist(ch_settings, attr):
     def category_loop(data):
         category_bl = ch_settings[attr]
         page = 1
@@ -373,9 +387,9 @@ def ch_blacklister(ch_settings, attr):
             print(f' {select}. Go back  {select+1}. next  {select+2}. previous')
             try:
                 userinput = int(input('Input: '))
-            except:
+            except ValueError:
                 os.system('cls')
-                print()
+                print('Invalid input')
                 continue
             os.system('cls')
             if userinput in range(start + 1, end + 1):
@@ -408,7 +422,7 @@ def ch_blacklister(ch_settings, attr):
 
 
 def category_select(category_list, category_bl):
-    display_list = list(filter(lambda x: x not in category_bl.values(), category_list))
+    display_list = [x for x in category_list if x not in category_bl.values()]
     # print the name out
     for i in range(0, len(display_list)):
         print(f'{i+1}.'.rjust(3) + display_list[i][1])
@@ -419,6 +433,7 @@ def category_select(category_list, category_bl):
         return
 
 
+# TODO: move to downloader
 def register_channel(data):
     ch_data = default_setting()
     url = input('Input channel url: ')
@@ -477,27 +492,81 @@ def delete_channel(data):
         print('Channel deletion aborted')
 
 
+def last_downloaded_category(ch_data):
+    cat_index = ch_data['prev']['category']
+    return ch_data['channel_category'][cat_index][1]
+
+
 # TODO: implement
 def download(data):
-    import downloader
     ch_data = select_channel(data)
     os.system('cls')
     if ch_data is None:
         print('Register a channel first')
         return
     print()
-    input('start download?')
-    downloader.temp_download(ch_data)
-    # while True:
-    #     choices = display_ch_filter(ch_data)
-    #     action = get_next_action(choices)
-    #     os.system('cls')
-    #     if action == 'break':
-    #         print()
-    #         return
-    #     else:
-    #         action(data)
-
+    while True:
+        display_download(ch_data)
+        ans = input('Input: ')
+        os.system('cls')
+        # download
+        if ans == '1':
+            print('Input page number')
+            while True:
+                try:
+                    startpage = int(input('Starting page: '))
+                    endpage = int(input('Ending page: '))
+                except ValueError:
+                    os.system('cls')
+                    print('Invalid input')
+                    continue
+                if startpage <= 0 or endpage < startpage:
+                    os.system('cls')
+                    print('Enter valid starting page and ending page')
+                    continue
+                os.system('cls')
+                print('Starting download...')
+                downloader.temp_download(ch_data, startpage, endpage)
+                input('Press enter')
+                os.system('cls')
+                print()
+                return
+        # select category
+        elif ans == '2':
+            print()
+            while True:
+                for i, category_name in enumerate((x[1] for x in ch_data['channel_category'])):
+                    print(f'{i+1}.'.rjust(3) + category_name)
+                try:
+                    userinput = int(input('Input: ')) - 1
+                except ValueError:
+                    os.system('cls')
+                    print('Invalid input')
+                    continue
+                os.system('cls')
+                if userinput in range(len(ch_data['channel_category'])):
+                    ch_data['prev']['category'] = userinput
+                    write_channels(data)
+                    break
+                else:
+                    print('Invalid index')
+        # toggle default filter
+        elif ans == '3':
+            ch_data['prev']['df_f'] = not ch_data['prev']['df_f']
+            if ch_data['prev']['df_f'] and ch_data['prev']['ch_f']:
+                ch_data['prev']['ch_f'] = False
+            write_channels(data)
+        # toggle channel filter
+        elif ans == '4':
+            ch_data['prev']['ch_f'] = not ch_data['prev']['ch_f']
+            if ch_data['prev']['df_f'] and ch_data['prev']['ch_f']:
+                ch_data['prev']['df_f'] = False
+            write_channels(data)
+        elif ans == '5':
+            print()
+            return
+        else:
+            print('Invalid input')
 
 
 def change_dl_location(data):
