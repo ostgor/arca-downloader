@@ -442,7 +442,7 @@ def category_select(category_list, category_bl):
     try:
         userinput = int(input('Add: '))
         return display_list[userinput - 1]
-    except ValueError:
+    except Exception:
         return
 
 
