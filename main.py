@@ -209,7 +209,7 @@ def blacklist(settings, attr: str):
                 userinput = int(input('Input: '))
             except ValueError:
                 os.system('cls')
-                print()
+                print('Invalid input')
                 continue
             if userinput in range(start+1, end+1):
                 if bl_dict.get(str(userinput)):
