@@ -69,7 +69,7 @@ def verify_data(data):
             ):
                 if type(data[key]) is not bool:
                     raise Exception('not a boolean')
-            for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_mode', 'dl_count', 'prev_category'):
+            for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_count', 'prev_category'):
                 if type(data[key]) is not int:
                     raise Exception('not an int')
             for key in ('channel_category',):
@@ -92,12 +92,18 @@ def verify_data(data):
     verify_settings(data['default'], False)
     for channel in data['channels']:
         verify_settings(channel, True)
+    if type(data['dl_mode']) is not int:
+        raise Exception('dl_mode not int')
+    if 'dl_location' not in data:
+        raise Exception('dl_location not in data')
 
 
 def create_default():
     data = {
         'default': default_setting(),
-        'channels': []
+        'channels': [],
+        'dl_mode': 2,
+        'dl_location': None
     }
     write_channels(data)
     return data
@@ -113,10 +119,8 @@ def default_setting():
         'ch_f': False,
         'dl_count': 0,
         'fav': False,
-        'dl_mode': 0,
         'category': False,
         'category_bl': {},
-        'download_location': None,
         'title': False,
         'title_bl': {},
         'content': False,
@@ -327,6 +331,17 @@ def display_download(ch_data):
     print(' 5. Go back')
 
 
+def display_dl_location(data):
+    print('[DOWNLOAD LOCATION]')
+    print(f' current mode: {data["dl_mode"]}')
+    print(' 1. "./<channel name>/file.ext"')
+    print(' 2. "./<channel name>/<category name>/file.ext')
+    print(' 3. "./arcalive_download/file.ext')
+    print(f' 4. User defined - current: {data["dl_location"]}')
+    print(' 5. Change user defined location')
+    print(' 6. Go back')
+
+
 # channel maintaining
 def specific_filter(data):
     ch_data = select_channel(data)
@@ -365,9 +380,9 @@ def select_channel(data) -> "channel's settings(dict)":
         try:
             ans = int(ans) - 1
             return ch_list[ans]
-        except:
+        except Exception:
             os.system('cls')
-            print('Invaild input')
+            print('Invalid input')
 
 
 def ch_blacklist(ch_settings, attr):
@@ -427,12 +442,13 @@ def category_select(category_list, category_bl):
     try:
         userinput = int(input('Add: '))
         return display_list[userinput - 1]
-    except:
+    except ValueError:
         return
 
 
 def register_channel(data):
     ch_data = default_setting()
+    print()
     url = input('Input channel url: ')
     url = url.strip()
     match = re.search(r'https://arca.live/b/\w+', url)
@@ -465,7 +481,7 @@ def delete_channel(data):
             ans = int(ans) - 1
             ch_name = data['channels'][ans]['channel_name']
             break
-        except:
+        except Exception:
             os.system('cls')
             print('Invaild input')
     os.system('cls')
@@ -520,7 +536,7 @@ def download(data):
                 os.system('cls')
                 print('Starting download...')
                 try:
-                    downloader.temp_download(ch_data, startpage, endpage, data['default'])
+                    downloader.temp_download(ch_data, startpage, endpage, data)
                 except Exception:
                     print('Failed download:')
                     traceback.print_exc()
@@ -577,9 +593,48 @@ def download(data):
             print('Invalid input')
 
 
-# TODO: implement
 def change_dl_location(data):
-    pass
+    print()
+    while True:
+        display_dl_location(data)
+        userinput = input("Input: ")
+        os.system('cls')
+        if userinput == '1':
+            data['dl_mode'] = 1
+            write_channels(data)
+        elif userinput == '2':
+            data['dl_mode'] = 2
+            write_channels(data)
+        elif userinput == '3':
+            data['dl_mode'] = 3
+            write_channels(data)
+        elif userinput == '4':
+            data['dl_mode'] = 4
+            write_channels(data)
+        elif userinput == '5':
+            print()
+            userdir = input('Input directory path: ')
+            # TODO: check if valid path
+            try:
+                userdir = os.path.dirname(userdir)
+            except Exception:
+                print('Invalid path')
+                traceback.print_exc()
+                input('Press enter')
+                os.system('cls')
+                print()
+                continue
+            if not userdir:
+                userdir = None
+            data['dl_location'] = userdir
+            os.system('cls')
+            write_channels(data)
+        elif userinput == '6':
+            print()
+            return
+        else:
+            print('Invalid input')
+
 
 
 if __name__ == '__main__':

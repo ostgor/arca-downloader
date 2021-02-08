@@ -10,23 +10,30 @@ def log(*args: str):
         f.write(' '.join(args) + '\n')
 
 
-def temp_download(ch_data, startpage, endpage, df_data):
+def temp_download(ch_data, startpage, endpage, data):
     s = time.perf_counter()
     # set filter
     if ch_data['df_f']:
-        _filter = df_data
+        _filter = data['default']
     elif ch_data['ch_f']:
         _filter = ch_data
     else:
         _filter = {}
     cat_index = ch_data['prev_category']
     ch_url, cat_url = ch_data['channel_url'], ch_data['channel_category'][cat_index][0]
-    article_list = []
+    # configure download location
+    dl_path = build_dl_path(
+        data['dl_mode'], data['dl_location'], ch_data['channel_name'], ch_data["channel_category"][cat_index][1]
+    )
+    if not os.path.exists(dl_path):
+        os.makedirs(dl_path)
+    # log
     log('-------------------new download----------------------\n')
     log(f'channel: {ch_data["channel_name"]}\ncategory: {ch_data["channel_category"][cat_index][1]}')
     log(f'page: {startpage}-{endpage}')
     log('\n----------------begin page download------------------')
     # page download
+    article_list = []
     for page in range(startpage, endpage+1):
         print(f'Analyzing page...{page}', end='\r')
         url = build_url(ch_url, cat_url, page)
@@ -35,7 +42,7 @@ def temp_download(ch_data, startpage, endpage, df_data):
     log('\n----------------begin article download---------------')
     # article download
     for article_url in article_list:
-        get_article('https://arca.live' + article_url, _filter)
+        get_article('https://arca.live' + article_url, _filter, dl_path)
     e = time.perf_counter()
     log(f'\nfinished in {e-s}\n')
     print(f'\nDownload complete in {e-s}s')
@@ -43,6 +50,19 @@ def temp_download(ch_data, startpage, endpage, df_data):
 
 c_re = re.compile(r'\?(category=.+)')
 
+
+def build_dl_path(mode, user_path, ch_name, cat_name):
+    if mode == 1:
+        return './' + ch_name + '/'
+    elif mode == 2:
+        return './' + ch_name + '/' + cat_name + '/'
+    elif mode == 3:
+        return './arcalive_download/'
+    else:
+        if user_path is None:
+            return './noname/'
+        else:
+            return user_path + '/'
 
 def build_url(ch_url, category_url, page, best=False):
     match = c_re.search(category_url)
@@ -90,7 +110,7 @@ def page_scrape(url, settings: dict, output_list):
         output_list.append(tag['href'])
 
 
-def get_article(article_url, settings: dict):
+def get_article(article_url, settings: dict, dl_path):
     print('Getting article...' + article_url, end='\r')
     r = requests.get(article_url)
     soup = bs4.BeautifulSoup(r.text, 'html.parser')
@@ -121,7 +141,7 @@ def get_article(article_url, settings: dict):
         print('Downloading...' + src, end='\r')
         log(f'downloading: {src}')
         r = requests.get('https:' + src)
-        with open('./dl/' + os.path.basename(src), 'wb') as f:
+        with open(dl_path + os.path.basename(src), 'wb') as f:
             f.write(r.content)
     print()
 
