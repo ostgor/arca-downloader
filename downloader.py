@@ -21,8 +21,8 @@ class Downloader(threading.Thread):
         try:
             self.temp_download()
         except Exception:
-            self.gui.log('failed download:')
-            self.gui.log(traceback.format_exc())
+            self.gui.log('failed download:', essential=True)
+            self.gui.log(traceback.format_exc(), essential=True)
         self.gui.root.event_generate('<<DownloadComplete>>')
 
     def temp_download(self):
@@ -53,22 +53,27 @@ class Downloader(threading.Thread):
             f'channel: {self.selected_ch["channel_name"]}\ncategory: {self.selected_cat[1]}',
             f'page: {self.startpg}-{self.endpg}',
             '\n----------begin page download-----------\n',
-            sep='\n'
+            sep='\n', essential=True
         )
 
         # page download
         article_list = []
         for page in range(self.startpg, self.endpg + 1):
+            # check if stop
+            if self.gui.destroy:
+                raise Exception('thread stopped')
             self.gui.log(f'requesting page {page}')
             url = build_url(ch_url, cat_url, page)
             self.page_scrape(url, _filter, article_list)
 
-        self.gui.log('\n---------begin article download---------')
+        self.gui.log('\n---------begin article download---------', essential=True)
         # article download
         for article_url in article_list:
+            if self.gui.destroy:
+                raise Exception('thread stopped')
             self.get_article('https://arca.live' + article_url, _filter, dl_path)
         e = time.perf_counter()
-        self.gui.log(f'\ndownload complete in {e - s}s\n')
+        self.gui.log(f'\ndownload complete in {e - s}s\n', essential=True)
 
     def page_scrape(self, url, settings: dict, output_list):
         r = requests.get(url, cookies={'allow_sensitive_media': 'true'})
@@ -173,8 +178,8 @@ class PageDownloader(threading.Thread):
         try:
             self.page_download()
         except Exception:
-            self.gui.log('failed download:')
-            self.gui.log(traceback.format_exc())
+            self.gui.log('failed download:', essential=True)
+            self.gui.log(traceback.format_exc(), essential=True)
 
     def page_download(self):
         # dl path
@@ -182,7 +187,7 @@ class PageDownloader(threading.Thread):
         if not os.path.exists(dl_path):
             os.makedirs(dl_path)
 
-        self.gui.log('\ngetting article:', self.url)
+        self.gui.log('\ngetting article:', self.url, essential=True)
         r = requests.get(self.url)
         soup = bs4.BeautifulSoup(r.text, 'html.parser')
         head = soup.select_one('head title').get_text()
@@ -197,7 +202,7 @@ class PageDownloader(threading.Thread):
             r = requests.get('https:' + src)
             with open(dl_path + os.path.basename(src), 'wb') as f:
                 f.write(r.content)
-        self.gui.log('\ndownload complete')
+        self.gui.log('\ndownload complete', essential=True)
 
 
 def ch_register(ch_url, ch_data):

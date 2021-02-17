@@ -33,17 +33,24 @@ class GUI:
             )
             return
 
+        # thread kill signal
+        self.destroy = False
+
         # root
         self.root.title('Arca-downloader')
         self.root.geometry('510x300')
         self.root.option_add('*tearOff', tk.FALSE)
+        self.root.protocol('WM_DELETE_WINDOW', self.window_close)
         self.root.bind('<<DownloadComplete>>', self.download_completion)
         self.root.bind('<<ChannelWindowClose>>', self.close_channels)
+        # route paste event to entry
+        self.root.bind('<<Paste>>', lambda e: self.ent_console.event_generate('<<Paste>>'))
 
         # menu
         self.mnu_main = tk.Menu(self.root)
 
         self.dl_mode = tk.IntVar(value=self.data['dl_mode'])
+        self.log_mode = tk.IntVar(value=self.data['log_mode'])
 
         self.mnu_save = tk.Menu(self.mnu_main)
         self.mnu_save.add_radiobutton(label='/file.ext', variable=self.dl_mode, value=1, command=self.change_dl_mode)
@@ -55,7 +62,15 @@ class GUI:
         )
         self.mnu_save.add_separator()
         self.mnu_save.add_command(label=self.data['dl_location'] or os.getcwd().replace('\\', '/'))
-        self.mnu_save.add_command(label='change save location', command=self.change_dl_location)
+        self.mnu_save.add_command(label='Change save location', command=self.change_dl_location)
+
+        self.mnu_log = tk.Menu(self.mnu_main)
+        self.mnu_log.add_radiobutton(
+            label='Verbose: log all info ', variable=self.log_mode, value=0, command=self.change_log_mode
+        )
+        self.mnu_log.add_radiobutton(
+            label='Silent: log essential info', variable=self.log_mode, value=1, command=self.change_log_mode
+        )
 
         self.mnu_help = tk.Menu(self.mnu_main)
         self.mnu_help.add_command(
@@ -67,9 +82,10 @@ class GUI:
         self.mnu_help.add_separator()
         self.mnu_help.add_command(label='About', command=self.about)
 
-        self.mnu_main.add_command(label='Channels', command=self.open_channels)
-        self.mnu_main.add_command(label='Settings', command=self.open_settings)
+        self.mnu_main.add_command(label='Channels', command=lambda: ChannelPage(self))
+        self.mnu_main.add_command(label='Settings', command=lambda: SettingsPage(self))
         self.mnu_main.add_cascade(label='Save', menu=self.mnu_save)
+        self.mnu_main.add_cascade(label='Log', menu=self.mnu_log)
         self.mnu_main.add_cascade(label='Help', menu=self.mnu_help)
 
         self.root['menu'] = self.mnu_main
@@ -87,14 +103,15 @@ class GUI:
 
         # console
         self.txt_console = tk.Text(self.fr_console, relief='flat', width=40, font=('Consolas', 10), wrap='word')
-        self.log('[Arca-Downloader v2.0 by obstgor@github]\n')
+        self.log('[Arca-Downloader v2.0 by obstgor@github]\n', essential=True)
         if self.new_setting:
-            self.log('could not find settings, default settings created')
+            self.log('could not find settings, default settings created', essential=True)
         else:
-            self.log('settings loaded successfully')
+            self.log('settings loaded successfully', essential=True)
 
         self.ent_console = ttk.Entry(self.fr_console)
         self.ent_console.bind('<Return>', self.entry_enter)
+        self.ent_console.bind('<<Paste>>', self.paste)
 
         self.scr_v = ttk.Scrollbar(self.fr_console, orient=tk.VERTICAL, command=self.txt_console.yview)
         self.txt_console['yscrollcommand'] = self.scr_v.set
@@ -179,6 +196,8 @@ class GUI:
         self.btn_download.grid(column=0, row=7, pady=(15, 0))
         self.btn_folder.grid(column=0, row=8, pady=(8, 0))
 
+        self.downloading = False
+
         # mainloop
         self.root.mainloop()
 
@@ -198,8 +217,8 @@ class GUI:
                 json.dump(self.data, f, indent=4)
         except PermissionError:
             if log:
-                self.log('settings not saved: type "save" to try again')
-                self.log(traceback.format_exc())
+                self.log('settings not saved: type "save" to try again', essential=True)
+                self.log(traceback.format_exc(), essential=True)
             messagebox.showerror(
                 title='Permission Error',
                 message='Permission error: Could not save settings'
@@ -207,8 +226,8 @@ class GUI:
             return
         except Exception as expt:
             if log:
-                self.log('settings not saved: type "save" to try again')
-                self.log(traceback.format_exc())
+                self.log('settings not saved: type "save" to try again', essential=True)
+                self.log(traceback.format_exc(), essential=True)
             messagebox.showerror(
                 title='Settings Corrupted',
                 message='Error: Could not save settings',
@@ -216,16 +235,21 @@ class GUI:
             )
             return
         if log:
-            self.log('settings saved')
+            self.log('settings saved', essential=True)
 
-    def log(self, *args: str, sep=' ', end='\n'):
-        self.txt_console['state'] = 'normal'
-        self.txt_console.insert('end', sep.join(args) + end)
-        self.txt_console['state'] = 'disabled'
-        self.txt_console.see('end')
+    def log(self, *args: str, sep=' ', end='\n', essential=False):
+        if self.data['log_mode'] == 0 or essential:
+            self.txt_console['state'] = 'normal'
+            self.txt_console.insert('end', sep.join(args) + end)
+            self.txt_console['state'] = 'disabled'
+            self.txt_console.see('end')
 
     def change_dl_mode(self):
         self.data['dl_mode'] = self.dl_mode.get()
+        self.write_settings()
+
+    def change_log_mode(self):
+        self.data['log_mode'] = self.log_mode.get()
         self.write_settings()
 
     def change_dl_location(self):
@@ -240,8 +264,8 @@ class GUI:
         try:
             webbrowser.open(url)
         except Exception:
-            self.log('could not open webpage:')
-            self.log(traceback.format_exc())
+            self.log('could not open webpage:', essential=True)
+            self.log(traceback.format_exc(), essential=True)
 
     def open_folder(self):
         os.startfile(self.data['dl_location'] or '.')
@@ -260,7 +284,7 @@ class GUI:
             '6. You can also download single articles by copy/pasting the article url to the text entry. Type "help"'
             + ' into the text entry for more information\n',
             'Made with Python 3.9 using tkinter.\nExternal module used: requests, bs4',
-            sep='\n'
+            sep='\n', essential=True
         )
 
     def check_pg(self, newval):
@@ -288,6 +312,10 @@ class GUI:
         ch_name_list = [ch['channel_name'] for ch in ch_list]
         return ch_list, ch_name_list
 
+    def paste(self, event):
+        self.ent_console.insert('end', self.root.clipboard_get())
+        return 'break'
+
     def ch_selected(self, event):
         self.cbb_channel.selection_clear()
         self.ch_valid = True
@@ -308,7 +336,6 @@ class GUI:
     def filter_mode_selected(self, event):
         self.cbb_filter.selection_clear()
 
-    # TODO: add silent mode... optimize logging (76secs for 1-3 on A. all)
     def download(self):
         # clear console
         self.txt_console['state'] = 'normal'
@@ -338,10 +365,28 @@ class GUI:
         self.spb_end.state(['disabled'])
         self.ent_console.state(['disabled'])
         # start download
+        self.downloading = True
         downloader.Downloader(self, selected_ch, selected_cat, start_pg, end_pg, filter_mode).start()
 
-    # TODO: warn if users try to close app before download is finished
+    def window_close(self):
+        if not self.downloading:
+            self.root.destroy()
+        else:
+            answer = messagebox.askyesno(
+                title='Download in progress', message='Download still in progress! Do you still want to exit?'
+            )
+            if answer is False:
+                return
+            else:
+                self.destroy = True
+                messagebox.showinfo(title='Stopping...', message='Shutting down downloader thread')
+                return
+
     def download_completion(self, event):
+        if self.destroy:
+            self.root.destroy()
+            return
+        self.downloading = False
         # enable widgets
         self.btn_download.state(['!disabled'])
         self.cbb_channel.state(['!disabled'])
@@ -354,7 +399,6 @@ class GUI:
         self.spb_end.state(['!disabled'])
         self.ent_console.state(['!disabled'])
 
-    # TODO: route paste events to entry
     def entry_enter(self, event):
         command = self.ent_console.get().lower()
         match = re.search(r'https://arca.live/b/\w+/\d+', command)
@@ -370,7 +414,7 @@ class GUI:
                 '- "save": save current settings. settings are automatically saved, so there is no reason to use this, '
                 + 'except when trying again due to an error while saving\n',
                 '- "help": prints this to the logging console',
-                sep='\n'
+                sep='\n', essential=True
             )
         elif command == 'save':
             self.write_settings()
@@ -380,13 +424,7 @@ class GUI:
             self.txt_console.insert('end', '\n')
             self.txt_console['state'] = 'disabled'
         else:
-            self.log('invalid command, type "help" for info')
-
-    def open_settings(self):
-        SettingsPage(self)
-
-    def open_channels(self):
-        ChannelPage(self)
+            self.log('invalid command, type "help" for info', essential=True)
 
     def close_channels(self, event):
         # reset comboboxes
@@ -887,7 +925,8 @@ def create_default():
         'channels': [],
         'dl_mode': 3,
         'dl_location': None,
-        'prev_ch': None
+        'prev_ch': None,
+        'log_mode': 0
     }
     return data
 
@@ -924,6 +963,8 @@ def verify_data(data):
         verify_settings(channel, True)
     if type(data['dl_mode']) is not int:
         raise Exception('dl_mode not int')
+    if type(data['log_mode']) is not int:
+        raise Exception('log_mode not int')
     if 'dl_location' not in data:
         raise Exception('dl_location not in data')
     if 'prev_ch' not in data:
