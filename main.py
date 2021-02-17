@@ -38,6 +38,7 @@ class GUI:
         self.root.geometry('510x300')
         self.root.option_add('*tearOff', tk.FALSE)
         self.root.bind('<<DownloadComplete>>', self.download_completion)
+        self.root.bind('<<ChannelWindowClose>>', self.close_channels)
 
         # menu
         self.mnu_main = tk.Menu(self.root)
@@ -66,9 +67,8 @@ class GUI:
         self.mnu_help.add_separator()
         self.mnu_help.add_command(label='About', command=self.about)
 
-        # TODO: implement
-        self.mnu_main.add_command(label='Channels')
-        self.mnu_main.add_command(label='Settings', command=self.open_Settings)
+        self.mnu_main.add_command(label='Channels', command=self.open_channels)
+        self.mnu_main.add_command(label='Settings', command=self.open_settings)
         self.mnu_main.add_cascade(label='Save', menu=self.mnu_save)
         self.mnu_main.add_cascade(label='Help', menu=self.mnu_help)
 
@@ -308,7 +308,14 @@ class GUI:
     def filter_mode_selected(self, event):
         self.cbb_filter.selection_clear()
 
+    # TODO: add silent mode... optimize logging (76secs for 1-3 on A. all)
     def download(self):
+        # clear console
+        self.txt_console['state'] = 'normal'
+        self.txt_console.delete('3.0', 'end')
+        self.txt_console.insert('end', '\n')
+        self.txt_console['state'] = 'disabled'
+
         selected_ch = self.ch_list[self.cbb_channel.current()]
         selected_cat = self.cat_list[self.cbb_category.current()]
         filter_mode = self.cbb_filter.current()
@@ -375,14 +382,121 @@ class GUI:
         else:
             self.log('invalid command, type "help" for info')
 
-    def open_Settings(self):
+    def open_settings(self):
         SettingsPage(self)
+
+    def open_channels(self):
+        ChannelPage(self)
+
+    def close_channels(self, event):
+        # reset comboboxes
+        self.ch_list, self.ch_name_list = self.channel_list()
+        self.cbb_channel['values'] = self.ch_name_list
+        if self.ch_name_list:
+            self.cbb_channel.set('Select channel')
+        else:
+            self.cbb_channel.set('Register a channel first')
+        self.cbb_category['values'] = []
+        self.cbb_category.set('')
+        self.cbb_filter.set('')
+        self.ch_valid = False
+        self.btn_download.state(['disabled'])
 
 
 class ChannelPage(GUI):
     def __init__(self, gui):
+        self.gui = gui
         self.data = gui.data
         self.txt_console = gui.txt_console
+
+        # new window
+        self.window = tk.Toplevel(gui.root)
+        self.window.geometry(f'+{gui.root.winfo_rootx()}+{gui.root.winfo_rooty()}')
+        self.window.title('Manage Channel')
+        self.window.resizable(tk.FALSE, tk.FALSE)
+        self.window.protocol('WM_DELETE_WINDOW', self.window_close)
+        self.window.transient(gui.root)
+        self.window.wait_visibility()
+        self.window.grab_set()
+
+        # blacklist
+        self.list_variable = tk.StringVar(value=[x['channel_name'] for x in self.data['channels']])
+
+        self.ent_url = ttk.Entry(self.window, width=30)
+        self.ent_url.focus()
+        self.ent_url.bind('<Return>', lambda e: self.register_channel())
+
+        btn_register = ttk.Button(self.window, text='Register', command=self.register_channel)
+        self.btn_delete = ttk.Button(self.window, text='Delete', command=self.delete_channel)
+        self.btn_delete.state(['disabled'])
+
+        self.lst_channels = tk.Listbox(self.window, height=15, width=25, relief='flat', listvariable=self.list_variable)
+        self.lst_channels.bind('<<ListboxSelect>>', self.listbox_select)
+
+        scr_listbox = ttk.Scrollbar(self.window, orient=tk.VERTICAL, command=self.lst_channels.yview)
+        self.lst_channels['yscrollcommand'] = scr_listbox.set
+
+        ttk.Style().configure('warn.TLabel', foreground='red')
+        self.lbl_warning = ttk.Label(self.window, style='warn.TLabel', wrap=100)
+
+        self.ent_url.grid(column=2, row=0, padx=15, sticky='s')
+        btn_register.grid(column=2, row=1)
+        self.lst_channels.grid(column=0, row=0, rowspan=5, pady=10, padx=(10, 0))
+        scr_listbox.grid(column=1, row=0, rowspan=5, sticky='wns', pady=10)
+        self.btn_delete.grid(column=2, row=2, sticky='n')
+        self.lbl_warning.grid(column=2, row=3)
+
+    def listbox_select(self, event):
+        if self.lst_channels.curselection():
+            self.btn_delete.state(['!disabled'])
+
+    def delete_channel(self):
+        ans = messagebox.askyesno(
+            title='Confirmation',
+            message=f'Are you sure you want to delete {self.lst_channels.get(self.lst_channels.curselection()[0])}?'
+        )
+        if not ans:
+            return
+        del self.data['channels'][self.lst_channels.curselection()[0]]
+        self.write_settings()
+        self.list_variable.set([x['channel_name'] for x in self.data['channels']])
+        if not self.lst_channels.curselection():
+            self.btn_delete.state(['disabled'])
+
+    def register_channel(self):
+        ch_url = self.ent_url.get()
+        self.ent_url.delete(0, 'end')
+        ch_url.strip()
+        match = re.search(r'https://arca.live/b/\w+', ch_url)
+        if not match:
+            self.warn('URL not valid')
+            return
+        ch_url = match.group(0)
+        ch_data = default_setting()
+        try:
+            ch_data = downloader.ch_register(ch_url, ch_data)
+        except Exception as expt:
+            messagebox.showerror(
+                title='Failed to get channel information',
+                message=traceback.format_exc()
+            )
+            return
+        self.data['channels'].append(ch_data)
+        self.write_settings()
+
+        self.list_variable.set([x['channel_name'] for x in self.data['channels']])
+        if not self.lst_channels.curselection():
+            self.btn_delete.state(['disabled'])
+        self.lst_channels.see(self.lst_channels.size() - 1)
+
+    def warn(self, text):
+        self.lbl_warning['text'] = text
+        self.window.after(3000, lambda: self.lbl_warning.configure(text=''))
+
+    def window_close(self):
+        self.gui.root.event_generate('<<ChannelWindowClose>>')
+        self.window.grab_release()
+        self.window.destroy()
 
 
 class SettingsPage(GUI):
@@ -390,8 +504,8 @@ class SettingsPage(GUI):
         self.data = gui.data
         self.txt_console = gui.txt_console
 
-        # TODO: override window close to save settings (should save when exiting, not when variables are changed)
         self.window = tk.Toplevel(gui.root)
+        self.window.geometry(f'+{gui.root.winfo_rootx()}+{gui.root.winfo_rooty()}')
         self.window.protocol('WM_DELETE_WINDOW', self.window_close)
         self.window.transient(gui.root)
         self.window.wait_visibility()
@@ -412,7 +526,7 @@ class SettingsPage(GUI):
 
         # frame
         lbl_channel = ttk.Label(self.window, text='Filter')
-        labelframe = ttk.Labelframe(self.window, text='configure')
+        labelframe = ttk.Labelframe(self.window, text='Filter active/inactive')
 
         # cbb_channel grid goes here
         lbl_channel.grid(column=0, row=0, padx=5, pady=(10, 5), sticky='e')
@@ -459,10 +573,10 @@ class SettingsPage(GUI):
         ToolTip(chk_downvote, text='Downloads article if downvote count is less than or equal the setting count')
         ToolTip(chk_combined, text='Downloads article if combined count is greater than or equal the setting count')
 
-        btn_title = ttk.Button(labelframe, text='Manage')
-        btn_content = ttk.Button(labelframe, text='Manage')
-        btn_uploader = ttk.Button(labelframe, text='Manage')
-        self.btn_category = ttk.Button(labelframe, text='Manage')
+        btn_title = ttk.Button(labelframe, text='Manage', command=lambda: BlackList(self, 'title_bl'))
+        btn_content = ttk.Button(labelframe, text='Manage', command=lambda: BlackList(self, 'content_bl'))
+        btn_uploader = ttk.Button(labelframe, text='Manage', command=lambda: BlackList(self, 'uploader_bl'))
+        self.btn_category = ttk.Button(labelframe, text='Manage', command=lambda: CategoryBlackList(self))
 
         self.upvote_num = tk.IntVar()
         self.downvote_num = tk.IntVar()
@@ -517,7 +631,11 @@ class SettingsPage(GUI):
         self.cbb_channel.grid(column=1, row=0, padx=5, pady=(10, 5), sticky='w')
 
     def filter_selected(self, event):
-        # TODO: save changes
+        # check if previous channel existed and if so save previous channel
+        if self.selected_ch is not None:
+            self.update_data()
+            self.write_settings()
+
         self.cbb_channel.selection_clear()
         self.selected_ch = self.ch_list[self.cbb_channel.current()]
         # if default filter
@@ -543,7 +661,185 @@ class SettingsPage(GUI):
         self.combined_num.set(self.selected_ch['combined_num'])
 
     def window_close(self):
-        # TODO: save
+        self.update_data()
+        self.write_settings()
+        self.window.grab_release()
+        self.window.destroy()
+
+    def update_data(self):
+        self.selected_ch['title'] = self.title.get()
+        self.selected_ch['content'] = self.content.get()
+        self.selected_ch['uploader'] = self.uploader.get()
+        self.selected_ch['upvote'] = self.upvote.get()
+        self.selected_ch['downvote'] = self.downvote.get()
+        self.selected_ch['combined'] = self.combined.get()
+        self.selected_ch['category'] = self.category.get()
+        self.selected_ch['fav'] = self.fav.get()
+        self.selected_ch['upvote_num'] = self.upvote_num.get()
+        self.selected_ch['downvote_num'] = self.downvote_num.get()
+        self.selected_ch['combined_num'] = self.combined_num.get()
+
+
+class BlackList(SettingsPage):
+    def __init__(self, settings, attr: str):
+        self.data = settings.data
+        self.bl_list = settings.selected_ch[attr]
+        self.txt_console = settings.txt_console
+
+        # new window
+        self.window = tk.Toplevel(settings.window)
+        self.window.geometry(f'+{settings.window.winfo_rootx()}+{settings.window.winfo_rooty()}')
+        self.window.title('Manage Blacklist')
+        self.window.resizable(tk.FALSE, tk.FALSE)
+        self.window.protocol('WM_DELETE_WINDOW', self.window_close)
+        self.window.transient(settings.window)
+        self.window.wait_visibility()
+        self.window.grab_set()
+
+        # blacklist
+        self.list_variable = tk.StringVar(value=self.bl_list)
+
+        ttk.Style().configure('warn.TLabel', foreground='red')
+        self.lbl_warning = ttk.Label(self.window, style='warn.TLabel', wrap=100)
+
+        self.ent_blacklist = ttk.Entry(self.window, width=15)
+        self.ent_blacklist.focus()
+        self.ent_blacklist.bind('<Return>', lambda e: self.add_blacklist())
+
+        btn_add = ttk.Button(self.window, text='Add', command=self.add_blacklist)
+        self.btn_delete = ttk.Button(self.window, text='Delete', command=self.delete_blacklist)
+
+        self.lst_blacklist = tk.Listbox(self.window, height=15, relief='flat', listvariable=self.list_variable)
+        self.lst_blacklist.bind('<<ListboxSelect>>', self.listbox_select)
+        if self.bl_list:
+            self.lst_blacklist.selection_set(0)
+        else:
+            self.btn_delete.state(['disabled'])
+        scr_listbox = ttk.Scrollbar(self.window, orient=tk.VERTICAL, command=self.lst_blacklist.yview)
+        self.lst_blacklist['yscrollcommand'] = scr_listbox.set
+
+        self.ent_blacklist.grid(column=2, row=0, padx=15, sticky='s')
+        btn_add.grid(column=2, row=1)
+        self.lst_blacklist.grid(column=0, row=0, rowspan=5, pady=10, padx=(10, 0))
+        scr_listbox.grid(column=1, row=0, rowspan=5, sticky='wns', pady=10)
+        self.btn_delete.grid(column=2, row=2, sticky='n')
+        self.lbl_warning.grid(column=2, row=3)
+
+    def listbox_select(self, event):
+        if self.lst_blacklist.curselection():
+            self.btn_delete.state(['!disabled'])
+
+    def delete_blacklist(self):
+        del self.bl_list[self.lst_blacklist.curselection()[0]]
+        self.write_settings()
+        self.list_variable.set(self.bl_list)
+        if not self.lst_blacklist.curselection():
+            self.btn_delete.state(['disabled'])
+
+    def add_blacklist(self):
+        word = self.ent_blacklist.get()
+        self.ent_blacklist.delete(0, 'end')
+        if word == '':
+            self.warn('Empty strings are not accepted!')
+            return
+        self.bl_list.append(word)
+        self.list_variable.set(self.bl_list)
+        self.write_settings()
+        self.lst_blacklist.see(len(self.bl_list) - 1)
+
+    # TODO: use validation to disable add button when entry is empty (remember the return binding)
+    def warn(self, text):
+        self.lbl_warning['text'] = text
+        self.window.after(3000, lambda: self.lbl_warning.configure(text=''))
+
+    def window_close(self):
+        self.window.grab_release()
+        self.window.destroy()
+
+
+class CategoryBlackList(SettingsPage):
+    def __init__(self, settings):
+        self.data = settings.data
+        self.selected_ch = settings.selected_ch
+        self.bl_list = self.selected_ch['category_bl']
+        self.txt_console = settings.txt_console
+
+        # new window
+        self.window = tk.Toplevel(settings.window)
+        self.window.geometry(f'+{settings.window.winfo_rootx()}+{settings.window.winfo_rooty()}')
+        self.window.title('Manage Blacklist')
+        self.window.resizable(tk.FALSE, tk.FALSE)
+        self.window.protocol('WM_DELETE_WINDOW', self.window_close)
+        self.window.transient(settings.window)
+        self.window.wait_visibility()
+        self.window.grab_set()
+
+        # blacklist
+        self.list_variable = tk.StringVar(value=self.bl_list)
+
+        self.cbb_blacklist = ttk.Combobox(
+            self.window, width=15,
+            values=[x[1] for x in self.selected_ch['channel_category'] if x[1] not in self.bl_list][1:]
+        )
+        self.cbb_blacklist.set('Select category')
+        self.cbb_blacklist.bind('<<ComboboxSelected>>', self.combobox_select)
+        self.cbb_blacklist.state(['readonly'])
+
+        self.btn_add = ttk.Button(self.window, text='Add', command=self.add_blacklist)
+        self.btn_add.state(['disabled'])
+        self.btn_delete = ttk.Button(self.window, text='Delete', command=self.delete_blacklist)
+
+        self.lst_blacklist = tk.Listbox(self.window, height=15, relief='flat', listvariable=self.list_variable)
+        # listboxselect is also generated when selection is removed (selecting a combobox when listbox is selected)
+        self.lst_blacklist.bind('<<ListboxSelect>>', self.listbox_select)
+        if self.bl_list:
+            self.lst_blacklist.selection_set(0)
+        else:
+            self.btn_delete.state(['disabled'])
+        scr_listbox = ttk.Scrollbar(self.window, orient=tk.VERTICAL, command=self.lst_blacklist.yview)
+        self.lst_blacklist['yscrollcommand'] = scr_listbox.set
+
+        self.cbb_blacklist.grid(column=2, row=0, padx=15, sticky='s')
+        self.btn_add.grid(column=2, row=1)
+        self.lst_blacklist.grid(column=0, row=0, rowspan=5, pady=10, padx=(10, 0))
+        scr_listbox.grid(column=1, row=0, rowspan=5, sticky='wns', pady=10)
+        self.btn_delete.grid(column=2, row=2, sticky='n')
+
+    def combobox_select(self, event):
+        self.cbb_blacklist.selection_clear()
+        self.btn_add.state(['!disabled'])
+        self.btn_delete.state(['disabled'])
+
+    def listbox_select(self, event):
+        if self.lst_blacklist.curselection():
+            self.btn_delete.state(['!disabled'])
+
+    def add_blacklist(self):
+        self.bl_list.append(self.cbb_blacklist.get())
+        self.cbb_blacklist.set('Select category')
+        self.btn_add.state(['disabled'])
+        self.cbb_blacklist.configure(
+            values=[x[1] for x in self.selected_ch['channel_category'] if x[1] not in self.bl_list][1:]
+        )
+        self.list_variable.set(self.bl_list)
+        self.write_settings()
+        self.lst_blacklist.see(len(self.bl_list) - 1)
+
+    def delete_blacklist(self):
+        del self.bl_list[self.lst_blacklist.curselection()[0]]
+        self.write_settings()
+        self.list_variable.set(self.bl_list)
+        # refresh combobox
+        self.cbb_blacklist.configure(
+            values=[x[1] for x in self.selected_ch['channel_category'] if x[1] not in self.bl_list][1:]
+        )
+        self.cbb_blacklist.set('Select category')
+        self.btn_add.state(['disabled'])
+
+        if not self.lst_blacklist.curselection():
+            self.btn_delete.state(['disabled'])
+
+    def window_close(self):
         self.window.grab_release()
         self.window.destroy()
 
@@ -571,7 +867,7 @@ class ToolTip:
         if not self.hint_window:
             # the mouse pointer cannot be above the created window as it registers as a leave event, destroying the window
             x = self.widget.winfo_pointerx() + 12
-            y = self.widget.winfo_rooty() + self.widget.bbox('insert')[3] + 5
+            y = self.widget.winfo_rooty() + self.widget.winfo_height()
             self.hint_window = tk.Toplevel(self.widget)
             self.hint_window.overrideredirect(True)
             self.hint_window.geometry(f'+{x}+{y}')
@@ -609,12 +905,9 @@ def verify_data(data):
             for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_count', 'prev_category', 'filter'):
                 if type(data[key]) is not int:
                     raise Exception('not an int')
-            for key in ('channel_category',):
+            for key in ('channel_category', 'category_bl', 'title_bl', 'content_bl', 'uploader_bl'):
                 if type(data[key]) is not list:
                     raise Exception('not a list')
-            for key in ('category_bl', 'title_bl', 'content_bl', 'uploader_bl'):
-                if type(data[key]) is not dict:
-                    raise Exception('not a dict')
         else:
             raise Exception('data not a dict')
         if is_channel:
@@ -647,11 +940,11 @@ def default_setting():
         'dl_count': 0,
         'fav': False,
         'category': False,
-        'category_bl': {},
+        'category_bl': [],
         'title': False,
-        'title_bl': {},
+        'title_bl': [],
         'content': False,
-        'content_bl': {},
+        'content_bl': [],
         'upvote': False,
         'upvote_num': 0,
         'downvote': False,
@@ -659,423 +952,11 @@ def default_setting():
         'combined': False,
         'combined_num': 0,
         'uploader': False,
-        'uploader_bl': {}
+        'uploader_bl': []
     }
     return df_setting
 
 
-
-
-
-
-
-
-
-
-
-
-############################################ LEGACY CODE ###############################################################
-def toggle(settings, attr: str):
-    def inner(data):
-        settings[attr] = not settings[attr]
-        write_channels(data)
-    return inner
-
-
-# TODO: if modifying upvotes and downvotes they should be 0 or more
-def modify(settings, attr: str):
-    def mod_loop(data):
-        while True:
-            print('Current count:', settings[attr])
-            num = input('Input count: ')
-            os.system('cls')
-            try:
-                num = int(num)
-                settings[attr] = num
-                write_channels(data)
-                return
-            except ValueError:
-                print('not a valid number')
-    return mod_loop
-
-
-def blacklist(settings, attr: str):
-    # column is set to 1 because korean language breaks ljust
-    def blacklist_loop(data):
-        bl_dict = settings[attr]
-        page = 1
-        print('Select an empty container to add, select an occupied one to delete')
-        while True:
-            elems_on_page = 10
-            start = (page-1) * elems_on_page
-            end = page * elems_on_page
-            for i in range(start+1, end+1):
-                print(f'{i}.'.rjust(4) + (bl_dict.get(str(i)) or ''))
-            select = 11 if page == 1 else 1
-            print(f' {select}. Go back  {select+1}. next  {select+2}. previous')
-            try:
-                userinput = int(input('Input: '))
-            except ValueError:
-                os.system('cls')
-                print('Invalid input')
-                continue
-            if userinput in range(start+1, end+1):
-                if bl_dict.get(str(userinput)):
-                    os.system('cls')
-                    del bl_dict[str(userinput)]
-                    write_channels(data)
-                else:
-                    new = input('Add: ')
-                    os.system('cls')
-                    if new:
-                        bl_dict[str(userinput)] = new
-                        write_channels(data)
-                    else:
-                        print('Empty strings are not accepted')
-            elif userinput == select:
-                os.system('cls')
-                print()
-                return
-            elif userinput == select + 1:
-                page += 1
-                os.system('cls')
-                print()
-            elif userinput == select + 2:
-                os.system('cls')
-                if page == 1:
-                    print('This is the first page')
-                else:
-                    page -= 1
-                    print()
-            else:
-                os.system('cls')
-                print('Invalid input')
-    return blacklist_loop
-
-
-# display related
-def display_main():
-    print('[ARCALIVE DOWNLOADER v1]')
-    print(' 1. Download')
-    print(' 2. Register a channel')
-    print(' 3. Delete a channel')
-    print(' 4. Configure channel specific filter')
-    print(' 5. Configure default filter')
-    print(' 6. Change default download location')
-    print(' 7. Quit')
-    choices = {
-        '1': download, '2': register_channel,
-        '3': delete_channel, '4': specific_filter,
-        '5': default_filter, '6': change_dl_location,
-        '7': 'break'
-    }
-    return choices
-
-
-def display_ch_filter(ch_data):
-    print(f'[CHANNEL SETTINGS: {ch_data["channel_name"]}]')
-    print(' 1. Filter download by title blacklist'.ljust(50, '-') + f'[{ch_data["title"]}]')
-    print(' 2. Manage title blacklist', end='\n\n')
-    print(' 3. Filter download by content blacklist'.ljust(50, '-') + f'[{ch_data["content"]}]')
-    print(' 4. Manage content blacklist', end='\n\n')
-    print(' 5. Filter download by uploader'.ljust(50, '-') + f'[{ch_data["uploader"]}]')
-    print(' 6. Manage uploader blacklist (not yet implemented)', end='\n\n')
-    print(' 7. Filter download by up-votes'.ljust(50, '-') + f'[{ch_data["upvote"]}]')
-    print(' 8. Manage upvote count ' + f'(download if {ch_data["upvote_num"]} or more)', end='\n\n')
-    print(' 9. Filter download by down-votes'.ljust(50, '-') + f'[{ch_data["downvote"]}]')
-    print('10. Manage downvote count ' + f'(download if {ch_data["downvote_num"]} or less)', end='\n\n')
-    print('11. Filter download by combined votes'.ljust(50, '-') + f'[{ch_data["combined"]}]')
-    print('12. Manage combined vote count ' + f'(download if {ch_data["combined_num"]} or more)', end='\n\n')
-    print('13. Filter download by CHANNEL CATEGORY'.ljust(50, '-') + f'[{ch_data["category"]}]')
-    print('14. Manage channel category blacklist', end='\n\n')
-    print('15. Favorite (shows at the top when selecting)'.ljust(50, '-') + f'[{ch_data["fav"]}]')
-    print('16. Go back')
-    choices = {
-        '1': toggle(ch_data, 'title'), '2': blacklist(ch_data, 'title_bl'),
-        '3': toggle(ch_data, 'content'), '4': blacklist(ch_data, 'content_bl'),
-        '5': toggle(ch_data, 'uploader'), '6': blacklist(ch_data, 'uploader_bl'),
-        '7': toggle(ch_data, 'upvote'), '8': modify(ch_data, 'upvote_num'),
-        '9': toggle(ch_data, 'downvote'), '10': modify(ch_data, 'downvote_num'),
-        '11': toggle(ch_data, 'combined'), '12': modify(ch_data, 'combined_num'),
-        '13': toggle(ch_data, 'category'), '14': ch_blacklist(ch_data, 'category_bl'),
-        '15': toggle(ch_data, 'fav'), '16': 'break'
-    }
-    return choices
-
-
-def display_df_filter(df_data):
-    print('[DEFAULT SETTINGS]')
-    print(' 1. Filter download by title blacklist'.ljust(50, '-') + f'[{df_data["title"]}]')
-    print(' 2. Manage title blacklist', end='\n\n')
-    print(' 3. Filter download by content blacklist'.ljust(50, '-') + f'[{df_data["content"]}]')
-    print(' 4. Manage content blacklist', end='\n\n')
-    print(' 5. Filter download by uploader'.ljust(50, '-') + f'[{df_data["uploader"]}]')
-    print(' 6. Manage uploader blacklist (not yet implemented)', end='\n\n')
-    print(' 7. Filter download by up-votes'.ljust(50, '-') + f'[{df_data["upvote"]}]')
-    print(' 8. Manage upvote count ' + f'(download if {df_data["upvote_num"]} or more)', end='\n\n')
-    print(' 9. Filter download by down-votes'.ljust(50, '-') + f'[{df_data["downvote"]}]')
-    print('10. Manage downvote count ' + f'(download if {df_data["downvote_num"]} or less)', end='\n\n')
-    print('11. Filter download by combined votes'.ljust(50, '-') + f'[{df_data["combined"]}]')
-    print('12. Manage combined vote count ' + f'(download if {df_data["combined_num"]} or more)', end='\n\n')
-    print('13. Go back')
-    choices = {
-        '1': toggle(df_data, 'title'), '2': blacklist(df_data, 'title_bl'),
-        '3': toggle(df_data, 'content'), '4': blacklist(df_data, 'content_bl'),
-        '5': toggle(df_data, 'uploader'), '6': blacklist(df_data, 'uploader_bl'),
-        '7': toggle(df_data, 'upvote'), '8': modify(df_data, 'upvote_num'),
-        '9': toggle(df_data, 'downvote'), '10': modify(df_data, 'downvote_num'),
-        '11': toggle(df_data, 'combined'), '12': modify(df_data, 'combined_num'),
-        '13': 'break'
-    }
-    return choices
-
-
-def display_download(ch_data):
-    print(f'[DOWNLOAD CHANNEL: {ch_data["channel_name"]}]')
-    print(' 1. Start download')
-    print(f' 2. Download category: {last_downloaded_category(ch_data)}')
-    print(' 3. Use default filter'.ljust(50, '-') + f'[{ch_data["df_f"]}]')
-    print(' 4. Use channel specific filter'.ljust(50, '-') + f'[{ch_data["ch_f"]}]')
-    print(' 5. Go back')
-
-
-def display_dl_location(data):
-    print('[DOWNLOAD LOCATION]')
-    print(f' current mode: {data["dl_mode"]}')
-    print(' 1. "./<channel name>/file.ext"')
-    print(' 2. "./<channel name>/<category name>/file.ext')
-    print(' 3. "./arcalive_download/file.ext')
-    print(f' 4. User defined - current: {data["dl_location"]}')
-    print(' 5. Change user defined location')
-    print(' 6. Go back')
-
-
-# channel maintaining
-def specific_filter(data):
-    ch_data = select_channel(data)
-    os.system('cls')
-    if ch_data is None:
-        print('Register a channel first')
-        return
-    print()
-    while True:
-        choices = display_ch_filter(ch_data)
-        action = get_next_action(choices)
-        os.system('cls')
-        if action == 'break':
-            print()
-            return
-        else:
-            action(data)
-
-
-def ch_blacklist(ch_settings, attr):
-    def category_loop(data):
-        category_bl = ch_settings[attr]
-        page = 1
-        print('Select an empty container to add, select an occupied one to delete')
-        while True:
-            elems_on_page = 10
-            start = (page-1) * elems_on_page
-            end = page * elems_on_page
-            for i in range(start+1, end+1):
-                print(f'{i}.'.rjust(4) + (category_bl.get(str(i))[1] if category_bl.get(str(i)) else ''))
-            select = 11 if page == 1 else 1
-            print(f' {select}. Go back  {select+1}. next  {select+2}. previous')
-            try:
-                userinput = int(input('Input: '))
-            except ValueError:
-                os.system('cls')
-                print('Invalid input')
-                continue
-            os.system('cls')
-            if userinput in range(start+1, end+1):
-                if category_bl.get(str(userinput)):
-                    del category_bl[str(userinput)]
-                    write_channels(data)
-                else:
-                    ct_choice = category_select(ch_settings['channel_category'], category_bl)
-                    os.system('cls')
-                    if ct_choice:
-                        category_bl[str(userinput)] = ct_choice
-                        write_channels(data)
-                    else:
-                        print('Invalid input')
-            elif userinput == select:
-                print()
-                return
-            elif userinput == select + 1:
-                page += 1
-                print()
-            elif userinput == select + 2:
-                if page == 1:
-                    print('This is the first page')
-                else:
-                    page -= 1
-                    print()
-            else:
-                print('Invalid input')
-    return category_loop
-
-
-def category_select(category_list, category_bl):
-    display_list = [x for x in category_list if x not in category_bl.values()]
-    # print the name out
-    for i in range(0, len(display_list)):
-        print(f'{i+1}.'.rjust(3) + display_list[i][1])
-    try:
-        userinput = int(input('Add: '))
-        return display_list[userinput - 1]
-    except Exception:
-        return
-
-
-def register_channel(data):
-    ch_data = default_setting()
-    print()
-    url = input('Input channel url: ')
-    url = url.strip()
-    match = re.search(r'https://arca.live/b/\w+', url)
-    if match:
-        url = match.group(0)
-        try:
-            ch_data = downloader.ch_register(url, ch_data)
-            os.system('cls')
-            data['channels'].append(ch_data)
-            write_channels(data)
-        except Exception as expt:
-            print('failed to register:', expt)
-    else:
-        os.system('cls')
-        print('URL not valid')
-        return
-
-
-def delete_channel(data):
-    if len(data['channels']) == 0:
-        os.system('cls')
-        print('Register a channel first')
-        return
-    print()
-    while True:
-        for i, dic in enumerate(data['channels']):
-            print(f'{i+1}.'.rjust(3) + dic['channel_name'])
-        ans = input('Select channel: ')
-        try:
-            ans = int(ans) - 1
-            ch_name = data['channels'][ans]['channel_name']
-            break
-        except Exception:
-            os.system('cls')
-            print('Invaild input')
-    os.system('cls')
-    print(f'Are you sure you want to delete {ch_name}?')
-    print(' 1. Yes  2. No')
-    usrinput = input('Input: ')
-    os.system('cls')
-    if usrinput == '1':
-        del data['channels'][ans]
-        write_channels(data)
-    else:
-        print('Channel deletion aborted')
-
-
-def last_downloaded_category(ch_data):
-    cat_index = ch_data['prev_category']
-    return ch_data['channel_category'][cat_index][1]
-
-
 # TODO: implement warning if category to download is blacklisted
-def download(data):
-    ch_data = select_channel(data)
-    os.system('cls')
-    if ch_data is None:
-        print('Register a channel first')
-        return
-    print()
-    while True:
-        display_download(ch_data)
-        ans = input('Input: ')
-        os.system('cls')
-        # download
-        if ans == '1':
-            print('Input page number')
-            while True:
-                try:
-                    startpage = int(input('Starting page: '))
-                    endpage = int(input('Ending page: '))
-                except ValueError:
-                    os.system('cls')
-                    print('Invalid input')
-                    continue
-                if startpage <= 0 or endpage < startpage:
-                    os.system('cls')
-                    print('Enter valid starting page and ending page')
-                    continue
-                print(f'Start download on page {startpage}-{endpage}?\n 1. Yes  2. No')
-                if input('Input: ') != '1':
-                    os.system('cls')
-                    print()
-                    break
-                os.system('cls')
-                print('Starting download...')
-                try:
-                    downloader.temp_download(ch_data, startpage, endpage, data)
-                except Exception:
-                    print('Failed download:')
-                    traceback.print_exc()
-                    try:
-                        with open('exception_log.txt', 'a') as f:
-                            traceback.print_exc(file=f)
-                    except Exception as expt:
-                        print('Failed to save exception:', expt)
-                    input('Press enter to return')
-                    os.system('cls')
-                    print()
-                    return
-                # else
-                input('Press enter')
-                os.system('cls')
-                ch_data['dl_count'] += 1
-                write_channels(data)
-                return
-        # select category
-        elif ans == '2':
-            print()
-            while True:
-                for i, category_name in enumerate((x[1] for x in ch_data['channel_category'])):
-                    print(f'{i+1}.'.rjust(3) + category_name)
-                try:
-                    userinput = int(input('Input: ')) - 1
-                except ValueError:
-                    os.system('cls')
-                    print('Invalid input')
-                    continue
-                os.system('cls')
-                if userinput in range(len(ch_data['channel_category'])):
-                    ch_data['prev_category'] = userinput
-                    write_channels(data)
-                    break
-                else:
-                    print('Invalid index')
-        # toggle default filter
-        elif ans == '3':
-            ch_data['df_f'] = not ch_data['df_f']
-            if ch_data['df_f'] and ch_data['ch_f']:
-                ch_data['ch_f'] = False
-            write_channels(data)
-        # toggle channel filter
-        elif ans == '4':
-            ch_data['ch_f'] = not ch_data['ch_f']
-            if ch_data['df_f'] and ch_data['ch_f']:
-                ch_data['df_f'] = False
-            write_channels(data)
-        elif ans == '5':
-            print()
-            return
-        else:
-            print('Invalid input')
-
-
 if __name__ == '__main__':
     GUI()

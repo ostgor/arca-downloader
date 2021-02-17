@@ -86,7 +86,7 @@ class Downloader(threading.Thread):
                     continue
             if settings.get('title'):
                 match = False
-                for word in settings['title_bl'].values():
+                for word in settings['title_bl']:
                     if word in title:
                         match = True
                         break
@@ -95,7 +95,7 @@ class Downloader(threading.Thread):
                     continue
             if settings.get('category'):
                 category = tag.select_one('.badge').get_text()
-                if category in map(lambda x: x[1], settings['category_bl'].values()):
+                if category in settings['category_bl']:
                     self.gui.log(f'skip: category {category}')
                     continue
             if settings.get('uploader'):
@@ -116,7 +116,7 @@ class Downloader(threading.Thread):
             raise Exception('version update needed: ⚠️ 제한된 콘텐츠')
         if settings.get('content'):
             content = soup.select_one('.article-content').get_text()
-            for string in settings['content_bl'].values():
+            for string in settings['content_bl']:
                 if string in content:
                     self.gui.log(f'skip: {string} in contents')
                     return
@@ -153,6 +153,7 @@ def build_dl_path(mode, user_path, ch_name, cat_name):
 c_re = re.compile(r'\?(category=.+)')
 
 
+# TODO: add download best mode
 def build_url(ch_url, category_url, page, best=False):
     match = c_re.search(category_url)
     if match:
@@ -199,7 +200,6 @@ class PageDownloader(threading.Thread):
         self.gui.log('\ndownload complete')
 
 
-# legacy
 def ch_register(ch_url, ch_data):
     r = requests.get(ch_url)
     r.raise_for_status()
