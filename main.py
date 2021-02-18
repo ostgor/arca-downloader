@@ -401,7 +401,7 @@ class GUI:
 
     def entry_enter(self, event):
         command = self.ent_console.get().lower()
-        match = re.search(r'https://arca.live/b/\w+/\d+', command)
+        match = re.search(r'https://.*arca.live/b/\w+/\d+', command)
         self.ent_console.delete(0, 'end')
         if match:
             downloader.PageDownloader(self, match.group(0)).start()
@@ -505,7 +505,7 @@ class ChannelPage(GUI):
         ch_url = self.ent_url.get()
         self.ent_url.delete(0, 'end')
         ch_url.strip()
-        match = re.search(r'https://arca.live/b/\w+', ch_url)
+        match = re.search(r'https://.*arca.live/b/\w+', ch_url)
         if not match:
             self.warn('URL not valid')
             return
@@ -740,11 +740,14 @@ class BlackList(SettingsPage):
         ttk.Style().configure('warn.TLabel', foreground='red')
         self.lbl_warning = ttk.Label(self.window, style='warn.TLabel', wrap=100)
 
-        self.ent_blacklist = ttk.Entry(self.window, width=15)
+        self.ent_blacklist = ttk.Entry(
+            self.window, width=15, validate='key', validatecommand=(self.window.register(self.check_entry), '%P')
+        )
         self.ent_blacklist.focus()
         self.ent_blacklist.bind('<Return>', lambda e: self.add_blacklist())
 
-        btn_add = ttk.Button(self.window, text='Add', command=self.add_blacklist)
+        self.btn_add = ttk.Button(self.window, text='Add', command=self.add_blacklist)
+        self.btn_add.state(['disabled'])
         self.btn_delete = ttk.Button(self.window, text='Delete', command=self.delete_blacklist)
 
         self.lst_blacklist = tk.Listbox(self.window, height=15, relief='flat', listvariable=self.list_variable)
@@ -757,11 +760,18 @@ class BlackList(SettingsPage):
         self.lst_blacklist['yscrollcommand'] = scr_listbox.set
 
         self.ent_blacklist.grid(column=2, row=0, padx=15, sticky='s')
-        btn_add.grid(column=2, row=1)
+        self.btn_add.grid(column=2, row=1)
         self.lst_blacklist.grid(column=0, row=0, rowspan=5, pady=10, padx=(10, 0))
         scr_listbox.grid(column=1, row=0, rowspan=5, sticky='wns', pady=10)
         self.btn_delete.grid(column=2, row=2, sticky='n')
         self.lbl_warning.grid(column=2, row=3)
+
+    def check_entry(self, newval):
+        if newval == '':
+            self.btn_add.state(['disabled'])
+        else:
+            self.btn_add.state(['!disabled'])
+        return True
 
     def listbox_select(self, event):
         if self.lst_blacklist.curselection():
@@ -785,7 +795,6 @@ class BlackList(SettingsPage):
         self.write_settings()
         self.lst_blacklist.see(len(self.bl_list) - 1)
 
-    # TODO: use validation to disable add button when entry is empty (remember the return binding)
     def warn(self, text):
         self.lbl_warning['text'] = text
         self.window.after(3000, lambda: self.lbl_warning.configure(text=''))
