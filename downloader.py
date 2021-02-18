@@ -8,7 +8,7 @@ import traceback
 
 
 class Downloader(threading.Thread):
-    def __init__(self, gui, selected_ch, selected_cat, startpg: int, endpg: int, filter_mode: int):
+    def __init__(self, gui, selected_ch, selected_cat, startpg: int, endpg: int, filter_mode: int, best: bool):
         threading.Thread.__init__(self)
         self.gui = gui
         self.selected_ch = selected_ch
@@ -16,6 +16,7 @@ class Downloader(threading.Thread):
         self.startpg = startpg
         self.endpg = endpg
         self.filter_mode = filter_mode
+        self.best = best
 
     def run(self):
         try:
@@ -63,7 +64,7 @@ class Downloader(threading.Thread):
             if self.gui.destroy:
                 raise Exception('thread stopped')
             self.gui.log(f'requesting page {page}')
-            url = build_url(ch_url, cat_url, page)
+            url = build_url(ch_url, cat_url, page, best=self.best)
             self.page_scrape(url, _filter, article_list)
 
         self.gui.log('\n---------begin article download---------', essential=True)
@@ -158,7 +159,6 @@ def build_dl_path(mode, user_path, ch_name, cat_name):
 c_re = re.compile(r'\?(category=.+)')
 
 
-# TODO: add download best mode
 def build_url(ch_url, category_url, page, best=False):
     match = c_re.search(category_url)
     if match:

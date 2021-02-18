@@ -103,7 +103,7 @@ class GUI:
 
         # console
         self.txt_console = tk.Text(self.fr_console, relief='flat', width=40, font=('Consolas', 10), wrap='word')
-        self.log('[Arca-Downloader v2.0 by obstgor@github]\n', essential=True)
+        self.log('[Arca-Downloader v2.1 by obstgor@github]\n', essential=True)
         if self.new_setting:
             self.log('could not find settings, default settings created', essential=True)
         else:
@@ -193,10 +193,17 @@ class GUI:
         lbl_filter.grid(column=0, row=4, sticky='w', pady=(3, 3))
         self.cbb_filter.grid(column=0, row=5)
         self.fr_page.grid(column=0, row=6, pady=(15, 0), sticky='w')
-        self.btn_download.grid(column=0, row=7, pady=(15, 0))
-        self.btn_folder.grid(column=0, row=8, pady=(8, 0))
+        self.btn_download.grid(column=0, row=8)
+        self.btn_folder.grid(column=0, row=9, pady=(8, 0))
 
         self.downloading = False
+
+        # best
+        self.best = tk.BooleanVar(value=self.data['best'])
+        self.chk_best = ttk.Checkbutton(
+            self.fr_download, variable=self.best, text='Download best', onvalue=True, offvalue=False
+        )
+        self.chk_best.grid(column=0, row=7, pady=10)
 
         # mainloop
         self.root.mainloop()
@@ -347,8 +354,10 @@ class GUI:
         selected_cat = self.cat_list[self.cbb_category.current()]
         filter_mode = self.cbb_filter.current()
         start_pg, end_pg = sorted((self.start_pg.get(), self.end_pg.get()))
+        best = self.best.get()
         # set prev data before download
         self.data['prev_ch'] = selected_ch['channel_name']
+        self.data['best'] = best
         selected_ch['prev_category'] = self.cbb_category.current()
         selected_ch['filter'] = filter_mode
         selected_ch['dl_count'] += 1
@@ -366,7 +375,7 @@ class GUI:
         self.ent_console.state(['disabled'])
         # start download
         self.downloading = True
-        downloader.Downloader(self, selected_ch, selected_cat, start_pg, end_pg, filter_mode).start()
+        downloader.Downloader(self, selected_ch, selected_cat, start_pg, end_pg, filter_mode, best).start()
 
     def window_close(self):
         if not self.downloading:
@@ -935,7 +944,8 @@ def create_default():
         'dl_mode': 3,
         'dl_location': None,
         'prev_ch': None,
-        'log_mode': 0
+        'log_mode': 0,
+        'best': False
     }
     return data
 
@@ -974,6 +984,8 @@ def verify_data(data):
         raise Exception('dl_mode not int')
     if type(data['log_mode']) is not int:
         raise Exception('log_mode not int')
+    if type(data['best']) is not bool:
+        raise Exception('best not bool')
     if 'dl_location' not in data:
         raise Exception('dl_location not in data')
     if 'prev_ch' not in data:
