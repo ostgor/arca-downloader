@@ -9,7 +9,7 @@ from tkinter import ttk
 from tkinter import messagebox
 from tkinter import filedialog
 
-
+# TODO: add option to turn on prev detection
 class GUI:
     def __init__(self):
         self.root = tk.Tk()
@@ -35,6 +35,10 @@ class GUI:
 
         # thread kill signal
         self.destroy = False
+
+        # downloaded article list - saved by main thread
+        self.article_list = []
+        self.selected_ch = None
 
         # root
         self.root.title('Arca-downloader')
@@ -103,7 +107,7 @@ class GUI:
 
         # console
         self.txt_console = tk.Text(self.fr_console, relief='flat', width=40, font=('Consolas', 10), wrap='word')
-        self.log('[Arca-Downloader v2.1 by obstgor@github]\n', essential=True)
+        self.log('[Arca-Downloader v3 by obstgor@github]\n', essential=True)
         if self.new_setting:
             self.log('could not find settings, default settings created', essential=True)
         else:
@@ -221,7 +225,7 @@ class GUI:
     def write_settings(self, log=True):
         try:
             with open('arca_downloader_settings.json', 'w') as f:
-                json.dump(self.data, f, indent=4)
+                json.dump(self.data, f, indent=2)
         except PermissionError:
             if log:
                 self.log('settings not saved: type "save" to try again', essential=True)
@@ -350,17 +354,17 @@ class GUI:
         self.txt_console.insert('end', '\n')
         self.txt_console['state'] = 'disabled'
 
-        selected_ch = self.ch_list[self.cbb_channel.current()]
+        self.selected_ch = self.ch_list[self.cbb_channel.current()]
         selected_cat = self.cat_list[self.cbb_category.current()]
         filter_mode = self.cbb_filter.current()
         start_pg, end_pg = sorted((self.start_pg.get(), self.end_pg.get()))
         best = self.best.get()
         # set prev data before download
-        self.data['prev_ch'] = selected_ch['channel_name']
+        self.data['prev_ch'] = self.selected_ch['channel_name']
         self.data['best'] = best
-        selected_ch['prev_category'] = self.cbb_category.current()
-        selected_ch['filter'] = filter_mode
-        selected_ch['dl_count'] += 1
+        self.selected_ch['prev_category'] = self.cbb_category.current()
+        self.selected_ch['filter'] = filter_mode
+        self.selected_ch['dl_count'] += 1
         self.write_settings()
         # disable widgets
         self.btn_download.state(['disabled'])
@@ -375,7 +379,7 @@ class GUI:
         self.ent_console.state(['disabled'])
         # start download
         self.downloading = True
-        downloader.Downloader(self, selected_ch, selected_cat, start_pg, end_pg, filter_mode, best).start()
+        downloader.Downloader(self, self.selected_ch, selected_cat, start_pg, end_pg, filter_mode, best).start()
 
     def window_close(self):
         if not self.downloading:
@@ -392,6 +396,9 @@ class GUI:
                 return
 
     def download_completion(self, event):
+        self.selected_ch['articles'].extend(self.article_list)
+        self.article_list.clear()
+        self.write_settings()
         if self.destroy:
             self.root.destroy()
             return
@@ -514,6 +521,7 @@ class ChannelPage(GUI):
         ch_url = self.ent_url.get()
         self.ent_url.delete(0, 'end')
         ch_url.strip()
+        # arca.live can have subdomains
         match = re.search(r'https://.*arca.live/b/\w+', ch_url)
         if not match:
             self.warn('URL not valid')
@@ -963,7 +971,7 @@ def verify_data(data):
             for key in ('combined_num', 'downvote_num', 'upvote_num', 'dl_count', 'prev_category', 'filter'):
                 if type(data[key]) is not int:
                     raise Exception('not an int')
-            for key in ('channel_category', 'category_bl', 'title_bl', 'content_bl', 'uploader_bl'):
+            for key in ('channel_category', 'category_bl', 'title_bl', 'content_bl', 'uploader_bl', 'articles'):
                 if type(data[key]) is not list:
                     raise Exception('not a list')
         else:
@@ -1014,7 +1022,8 @@ def default_setting():
         'combined': False,
         'combined_num': 0,
         'uploader': False,
-        'uploader_bl': []
+        'uploader_bl': [],
+        'articles': []
     }
     return df_setting
 

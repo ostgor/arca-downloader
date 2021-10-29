@@ -7,16 +7,21 @@ import threading
 import traceback
 
 
+NAME_RE = re.compile(r'/b/(\w+)/(\d+)')
+
+
 class Downloader(threading.Thread):
     def __init__(self, gui, selected_ch, selected_cat, startpg: int, endpg: int, filter_mode: int, best: bool):
         threading.Thread.__init__(self)
         self.gui = gui
+        self.s = requests.Session()
         self.selected_ch = selected_ch
         self.selected_cat = selected_cat
         self.startpg = startpg
         self.endpg = endpg
         self.filter_mode = filter_mode
         self.best = best
+        self.articles = set(selected_ch['articles'])
 
     def run(self):
         try:
@@ -77,11 +82,21 @@ class Downloader(threading.Thread):
         self.gui.log(f'\ndownload complete in {e - s}s\n', essential=True)
 
     def page_scrape(self, url, settings: dict, output_list):
-        r = requests.get(url, cookies={'allow_sensitive_media': 'true'})
+        r = self.s.get(url, cookies={'allow_sensitive_media': 'true'})
         soup = bs4.BeautifulSoup(r.text, 'html.parser')
         for tag in soup.select('[class=vrow]'):
             title = tag.select_one('.title').getText()
             self.gui.log(f'\nanalyzing: {title}')
+
+            # duplicate article check
+            article_url = tag['href']
+            match = NAME_RE.search(article_url)
+            if not match:
+                self.gui.log('WARNING: failed to match url regex on url: ' + article_url, essential=True)
+            elif match.group(2) in self.articles:
+                self.gui.log('skip: previously downloaded')
+                continue
+
             if not tag.select_one('.vrow-preview'):
                 self.gui.log('skip: no image')
                 continue
@@ -110,11 +125,11 @@ class Downloader(threading.Thread):
             # if True:
             #     print(tag.select_one('time')['datetime'])
             self.gui.log('appending to queue')
-            output_list.append(tag['href'])
+            output_list.append(article_url)
 
     def get_article(self, article_url, settings: dict, dl_path):
         self.gui.log('getting article:', article_url)
-        r = requests.get(article_url)
+        r = self.s.get(article_url)
         soup = bs4.BeautifulSoup(r.text, 'html.parser')
         head = soup.select_one('head title').get_text()
         self.gui.log(f'\narticle: {head}')
@@ -138,11 +153,23 @@ class Downloader(threading.Thread):
                 return
         src_list = []
         for img in soup.select('.article-content img'):
-            src_list.append(img.get('src'))
+            img_url = img.get('src')
+            src_list.append(img_url if img_url.startswith('https:') else 'https:' + img_url)
+        for video in soup.select('.article-content video'):
+            vid_url = video.get('src')
+            src_list.append(vid_url if vid_url.startswith('https:') else 'https:' + vid_url)
+        match = NAME_RE.search(article_url)
+        # Does not add article number if not matched
+        prefix = None
+        if match:
+            prefix = f'{match.group(1)}-{match.group(2)}-'
+            self.gui.article_list.append(match.group(2))
         for i, src in enumerate(src_list):
             self.gui.log(f'downloading: {src}')
-            r = requests.get('https:' + src)
-            with open(dl_path + os.path.basename(src), 'wb') as f:
+            r = self.s.get(src)
+            ext = os.path.splitext(src)[1]
+            filename = prefix + str(i) + ext if prefix else os.path.basename(src)
+            with open(dl_path + filename, 'wb') as f:
                 f.write(r.content)
 
 
@@ -156,11 +183,11 @@ def build_dl_path(mode, user_path, ch_name, cat_name):
         return dirpath + ch_name + '/' + cat_name + '/'
 
 
-c_re = re.compile(r'\?(category=.+)')
+C_RE = re.compile(r'\?(category=.+)')
 
 
 def build_url(ch_url, category_url, page, best=False):
-    match = c_re.search(category_url)
+    match = C_RE.search(category_url)
     if match:
         category_url = '&' + match.group(1)
     else:
@@ -168,10 +195,12 @@ def build_url(ch_url, category_url, page, best=False):
     return ch_url + f'?p={page}' + category_url + ('&mode=best' if best else '')
 
 
+# Page downloader does not add article to downloaded articles
 class PageDownloader(threading.Thread):
     def __init__(self, gui, url):
         threading.Thread.__init__(self)
         self.gui = gui
+        self.s = requests.Session()
         self.url = url
 
     def run(self):
@@ -188,7 +217,7 @@ class PageDownloader(threading.Thread):
             os.makedirs(dl_path)
 
         self.gui.log('\ngetting article:', self.url, essential=True)
-        r = requests.get(self.url)
+        r = self.s.get(self.url)
         soup = bs4.BeautifulSoup(r.text, 'html.parser')
         head = soup.select_one('head title').get_text()
         self.gui.log(f'article: {head}\n')
@@ -196,11 +225,20 @@ class PageDownloader(threading.Thread):
             raise Exception('version update needed: ⚠️ 제한된 콘텐츠')
         src_list = []
         for img in soup.select('.article-content img'):
-            src_list.append(img.get('src'))
+            img_url = img.get('src')
+            src_list.append(img_url if img_url.startswith('https:') else 'https:' + img_url)
+        for video in soup.select('.article-content video'):
+            vid_url = video.get('src')
+            src_list.append(vid_url if vid_url.startswith('https:') else 'https:' + vid_url)
+        # filename prefix
+        match = NAME_RE.search(self.url)
+        prefix = f'{match.group(1)}-{match.group(2)}-' if match else None
         for i, src in enumerate(src_list):
             self.gui.log(f'downloading: {src}')
-            r = requests.get('https:' + src)
-            with open(dl_path + os.path.basename(src), 'wb') as f:
+            r = self.s.get(src)
+            ext = os.path.splitext(src)[1]
+            filename = prefix + str(i) + ext if prefix else os.path.basename(src)
+            with open(dl_path + filename, 'wb') as f:
                 f.write(r.content)
         self.gui.log('\ndownload complete', essential=True)
 
@@ -209,7 +247,7 @@ def ch_register(ch_url, ch_data):
     r = requests.get(ch_url)
     r.raise_for_status()
     soup = bs4.BeautifulSoup(r.text, 'html.parser')
-    ch_data['channel_name'] = soup.select_one('.board-title > a:nth-child(2)').get_text()
+    ch_data['channel_name'] = soup.select_one('.board-title > a:last-of-type').get_text()
     if not ch_data['channel_name']:
         raise Exception('no channel name found')
     for tag in soup.select('.board-category a'):
